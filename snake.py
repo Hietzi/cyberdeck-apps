@@ -1,1 +1,1 @@
-
+print("Snake läuft!")
