@@ -1,4 +1,4 @@
-# pong.py - CyberDeck Pong App
+# pong.py - CyberDeck Pong App 
 # Verfügbar: tft, W, H, BTN_LEFT, BTN_SELECT, BTN_RIGHT
 
 import time
