@@ -1,4 +1,5 @@
 snake
+pong
 clock
 calculator
 sysmon
