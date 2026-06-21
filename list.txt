@@ -2,3 +2,4 @@ snake
 clock
 calculator
 sysmon
+settings
