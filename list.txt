@@ -5,3 +5,4 @@ clock
 calculator
 sysmon
 settings
+matrix
