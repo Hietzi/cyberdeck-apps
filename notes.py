@@ -1,195 +1,171 @@
-# notes.py - CyberDeck Notes Viewer
-# Verfügbar: tft, W, H, BTN_LEFT, BTN_SELECT, BTN_RIGHT
-
+# notes.py - CyberDeck Notes Browser (Landscape Overhaul)
 import os
 import time
-
-# Farben (byte-swapped für Framebuffer)
-def _c(color):
-    return ((color & 0xFF) << 8) | (color >> 8)
-
-BLACK  = _c(0x0000)
-WHITE  = _c(0xFFFF)
-GREEN  = _c(0x07E0)
-CYAN   = _c(0x07FF)
-YELLOW = _c(0xFFE0)
-RED    = _c(0xF800)
-DARK   = _c(0x18C3)
+from st7735 import BLACK, WHITE, GREEN, GREY, DARKGREY, CYAN
 
 NOTES_DIR = "/notes"
-
-HEADER_H = 12
-LINE_H   = 10
-LINES    = (H - HEADER_H - 12) // LINE_H
-
-def wait_release():
-    time.sleep_ms(80)
-    while BTN_LEFT.value() == 0 or BTN_SELECT.value() == 0 or BTN_RIGHT.value() == 0:
-        time.sleep_ms(10)
-    time.sleep_ms(80)
+HEADER_H = 14
+FOOTER_H = 12
+ITEM_H = 14
+MAX_VISIBLE = 6
 
 def get_notes():
     try:
-        files = []
-        for f in os.listdir(NOTES_DIR):
-            if f.lower().endswith(".txt"):
-                files.append(f)
-        files.sort()
-        return files
+        return [f for f in os.listdir(NOTES_DIR) if f.lower().endswith(".txt")]
     except:
+        try: os.mkdir(NOTES_DIR)
+        except: pass
         return []
 
-def draw_header(title):
-    tft.fill_rect(0, 0, W, HEADER_H, DARK)
-    tft.text(title[:24], 2, 2, CYAN)
-
-def draw_status(txt):
-    tft.fill_rect(0, H - 12, W, 12, BLACK)
-    tft.text(txt[:26], 2, H - 10, GREEN)
-
-def menu(files, sel):
-    tft.fill(BLACK)
-    draw_header("NOTES")
-
-    for i, f in enumerate(files):
-        y = HEADER_H + 4 + i * 11
-
-        if y > H - 14:
-            break
-
-        if i == sel:
-            tft.fill_rect(0, y - 1, W, 10, DARK)
-            tft.text("> " + f[:20], 2, y, YELLOW)
-        else:
-            tft.text("  " + f[:20], 2, y, WHITE)
-
-    draw_status("L/R nav SEL open")
-    tft.show()
-
-def load_note(filename):
+def read_note_file(filename):
     try:
         with open(NOTES_DIR + "/" + filename, "r") as f:
             return f.read()
     except:
-        return "Failed to open file."
+        return "Fehler beim Lesen!"
 
-def wrap_text(text):
+def view_note(filename, content):
+    # Zeilenweises Splitten für das Querformat (ca. 20 Zeichen pro Zeile bei 160px Breite)
+    words = content.replace("\n", " \n ").split(" ")
     lines = []
-
-    for raw in text.split("\n"):
-        while len(raw) > 25:
-            lines.append(raw[:25])
-            raw = raw[25:]
-        lines.append(raw)
-
-    return lines
-
-def view_note(filename):
-    lines = wrap_text(load_note(filename))
+    curr_line = ""
+    
+    for w in words:
+        if w == "\n":
+            lines.append(curr_line)
+            curr_line = ""
+        elif len(curr_line) + len(w) < 19:
+            curr_line += w + " "
+        else:
+            lines.append(curr_line)
+            curr_line = w + " "
+    if curr_line:
+        lines.append(curr_line)
+        
+    lines_per_page = 8
     page = 0
-
+    total_pages = max(1, (len(lines) + lines_per_page - 1) // lines_per_page)
+    
+    last_l = last_r = last_s = 1
+    
     while True:
         tft.fill(BLACK)
-
-        draw_header(filename[:20])
-
-        start = page * LINES
-
-        for i in range(LINES):
+        tft.fill_rect(0, 0, W, HEADER_H, CYAN)
+        tft.text(filename[:16], 4, 3, BLACK)
+        tft.text("{}/{}".format(page+1, total_pages), W - 35, 3, BLACK)
+        
+        start = page * lines_per_page
+        for i in range(lines_per_page):
             idx = start + i
-            if idx >= len(lines):
-                break
-
-            tft.text(lines[idx], 2,
-                     HEADER_H + 2 + i * LINE_H,
-                     WHITE)
-
-        pages = max(1, (len(lines) + LINES - 1) // LINES)
-
-        draw_status(
-            str(page + 1) + "/" +
-            str(pages) +
-            " SEL back"
-        )
-
+            if idx >= len(lines): break
+            tft.text(lines[idx], 4, HEADER_H + 4 + (i * 11), WHITE)
+            
+        # Reader Footer
+        tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
+        tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
+        tft.text("L/R: Pages  SEL: Close Note", 4, H - FOOTER_H + 2, GREY)
         tft.show()
-
-        last_l = BTN_LEFT.value()
-        last_r = BTN_RIGHT.value()
-        last_s = BTN_SELECT.value()
-
+        
         while True:
             l = BTN_LEFT.value()
             r = BTN_RIGHT.value()
             s = BTN_SELECT.value()
-
+            
             if last_l == 1 and l == 0:
-                if page > 0:
-                    page -= 1
-                wait_release()
-                break
-
+                page = max(0, page - 1)
+                time.sleep_ms(150); break
             if last_r == 1 and r == 0:
-                if page < pages - 1:
-                    page += 1
-                wait_release()
-                break
-
+                page = min(total_pages - 1, page + 1)
+                time.sleep_ms(150); break
             if last_s == 1 and s == 0:
-                wait_release()
-                return
+                time.sleep_ms(100)
+                return # Zurück zur Dateiliste
+                
+            last_l = l; last_r = r; last_s = s
+            time.sleep_ms(10)
 
-            last_l = l
-            last_r = r
-            last_s = s
+# Main File Browser Loop
+sel = 0
+last_l = last_r = last_s = 1
 
-            time.sleep_ms(20)
-
-def run():
+while True:
     files = get_notes()
-
     if not files:
         tft.fill(BLACK)
-        draw_header("NOTES")
-        tft.text("No .txt files", 20, 40, RED)
-        tft.text("in /notes", 32, 52, WHITE)
+        tft.fill_rect(0, 0, W, HEADER_H, GREEN)
+        tft.text("NOTES BROWSER", 4, 3, BLACK)
+        tft.text("Keine Notizen (.txt)", 4, 40, RED)
+        tft.text("Ordner: /notes/", 4, 55, WHITE)
+        tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
+        tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
+        tft.text("SEL: Exit to Menu", 4, H - FOOTER_H + 2, GREY)
         tft.show()
-        wait_release()
-        return
-
-    sel = 0
-
+        while BTN_SELECT.value() == 1: time.sleep_ms(10)
+        time.sleep_ms(150)
+        break
+        
+    # Zeichne Dateiliste im Stil des Hauptmenüs (Fullscreen Landscape)
+    tft.fill(BLACK)
+    tft.fill_rect(0, 0, W, HEADER_H, GREEN)
+    tft.text("NOTES BROWSER", 4, 3, BLACK)
+    
+    # Scroll-Indizierung
+    start_idx = 0
+    if len(files) > MAX_VISIBLE:
+        if sel >= MAX_VISIBLE - 2:
+            start_idx = min(sel - (MAX_VISIBLE - 3), len(files) - MAX_VISIBLE)
+            
+    for idx in range(MAX_VISIBLE):
+        f_idx = start_idx + idx
+        if f_idx >= len(files): break
+        name = files[f_idx]
+        y = HEADER_H + 4 + (idx * ITEM_H)
+        
+        if f_idx == sel:
+            tft.fill_rect(0, y, W - 6, ITEM_H, DARKGREY)
+            tft.fill_rect(0, y, 3, ITEM_H, GREEN)
+            tft.text(name[:22], 8, y + 3, GREEN)
+        else:
+            tft.text(name[:22], 8, y + 3, WHITE)
+            
+    # Scrollbar rechts
+    if len(files) > MAX_VISIBLE:
+        sb_h = max(10, (MAX_VISIBLE * 90) // len(files))
+        sb_y = HEADER_H + 4 + ((sel * (90 - sb_h)) // (len(files) - 1))
+        tft.fill_rect(W - 4, HEADER_H + 4, 2, 90, DARKGREY)
+        tft.fill_rect(W - 4, sb_y, 2, sb_h, GREEN)
+        
+    # Footer mit Exit-Hinweis über Button-Akkord oder langes Drücken
+    tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
+    tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
+    tft.text("L/R: Nav SEL: Open (L+R: Exit)", 4, H - FOOTER_H + 2, GREY)
+    tft.show()
+    
+    # Navigation Logik
+    action = None
     while True:
-        menu(files, sel)
-
-        last_l = BTN_LEFT.value()
-        last_r = BTN_RIGHT.value()
-        last_s = BTN_SELECT.value()
-
-        while True:
-            l = BTN_LEFT.value()
-            r = BTN_RIGHT.value()
-            s = BTN_SELECT.value()
-
-            if last_l == 1 and l == 0:
-                sel = (sel - 1) % len(files)
-                wait_release()
-                break
-
-            if last_r == 1 and r == 0:
-                sel = (sel + 1) % len(files)
-                wait_release()
-                break
-
-            if last_s == 1 and s == 0:
-                wait_release()
-                view_note(files[sel])
-                break
-
-            last_l = l
-            last_r = r
-            last_s = s
-
-            time.sleep_ms(20)
-
-run()
+        l = BTN_LEFT.value()
+        r = BTN_RIGHT.value()
+        s = BTN_SELECT.value()
+        
+        if l == 0 and r == 0: # Akkord zum Beenden
+            action = "EXIT"
+            time.sleep_ms(200); break
+        if last_l == 1 and l == 0:
+            sel = (sel - 1) % len(files)
+            time.sleep_ms(150); break
+        if last_r == 1 and r == 0:
+            sel = (sel + 1) % len(files)
+            time.sleep_ms(150); break
+        if last_s == 1 and s == 0:
+            action = "OPEN"
+            time.sleep_ms(100); break
+            
+        last_l = l; last_r = r; last_s = s
+        time.sleep_ms(10)
+        
+    if action == "EXIT":
+        break
+    if action == "OPEN":
+        content = read_note_file(files[sel])
+        view_note(files[sel], content)
