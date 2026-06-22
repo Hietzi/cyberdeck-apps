@@ -1,97 +1,91 @@
-# sysmon.py - CyberDeck System Monitor
-# Verfügbar: tft, W, H, BTN_LEFT, BTN_SELECT, BTN_RIGHT
-
+# sysmon.py - CyberDeck System Monitor (Landscape Overhaul)
 import time
 import network
-import micropython
 import gc
+from machine import freq
+from st7735 import BLACK, WHITE, GREEN, CYAN, RED, GREY, DARKGREY, YELLOW
 
-def _c(color):
-    return ((color & 0xFF) << 8) | (color >> 8)
+HEADER_H = 14
+FOOTER_H = 12
 
-BLACK  = _c(0x0000)
-WHITE  = _c(0xFFFF)
-GREEN  = _c(0x07E0)
-RED    = _c(0xF800)
-CYAN   = _c(0x07FF)
-YELLOW = _c(0xFFE0)
-GREY   = _c(0x8410)
-ACCENT = GREEN
+def draw_bar(x, y, w, h, pct, col):
+    tft.fill_rect(x, y, w, h, DARKGREY)
+    fill_w = int(w * pct)
+    if fill_w > 0:
+        tft.fill_rect(x, y, fill_w, h, col)
 
-def _bar(x, y, w, h, pct, col):
-    tft.fill_rect(x, y, w, h, _c(0x2104))
-    tft.fill_rect(x, y, int(w * pct), h, col)
-
-def _draw():
+def draw_sysmon():
     gc.collect()
     tft.fill(BLACK)
-    tft.fill_rect(0, 0, W, 14, ACCENT)
-    tft.text("System Monitor", 2, 3, BLACK)
-
-    y = 18
-
-    # WiFi
+    
+    # Header
+    tft.fill_rect(0, 0, W, HEADER_H, GREEN)
+    tft.text("SYSTEM MONITOR", 4, 3, BLACK)
+    
+    y = 20
+    
+    # 1. WiFi Status
     wlan = network.WLAN(network.STA_IF)
     if wlan.isconnected():
-        ip   = wlan.ifconfig()[0]
-        ssid = wlan.config("essid")
-        rssi = wlan.status("rssi")
-        tft.text("WiFi: " + ssid[:12], 2, y, GREEN); y += 12
-        tft.text("IP:   " + ip, 2, y, WHITE);         y += 12
-        tft.text("RSSI: %d dBm" % rssi, 2, y, CYAN);  y += 12
+        ip = wlan.ifconfig()[0]
+        try:
+            rssi = wlan.status("rssi")
+        except:
+            rssi = 0
+        tft.text("WiFi: Online", 4, y, GREEN)
+        tft.text("IP: " + ip, 80, y, WHITE)
+        y += 12
+        tft.text("RSSI: {} dBm".format(rssi), 4, y, CYAN)
     else:
-        tft.text("WiFi: nicht verbunden", 2, y, RED);  y += 12
-
-    y += 2
-
-    # RAM
-    free  = gc.mem_free()
-    total = gc.mem_alloc() + free
-    pct   = (total - free) / total
-    tft.text("RAM: %dKB/%dKB" % (free//1024, total//1024), 2, y, WHITE); y += 11
-    _bar(2, y, W-4, 6, pct, GREEN if pct < 0.7 else YELLOW if pct < 0.9 else RED)
+        tft.text("WiFi: Offline", 4, y, RED)
+    
+    y += 16
+    
+    # 2. RAM Usage
+    free = gc.mem_free()
+    alloc = gc.mem_alloc()
+    total = free + alloc
+    pct_ram = alloc / total if total > 0 else 0
+    tft.text("RAM: {}K / {}K".format(alloc//1024, total//1024), 4, y, WHITE)
     y += 10
-
-    # CPU
-    try:
-        from machine import freq
-        cpu = freq() // 1_000_000
-        tft.text("CPU: %d MHz" % cpu, 2, y, WHITE); y += 12
-    except:
-        pass
-
-    # Uptime
-    ms      = time.ticks_ms()
-    secs    = ms // 1000
-    mins    = secs // 60
-    hrs     = mins // 60
-    tft.text("Up: %02d:%02d:%02d" % (hrs, mins % 60, secs % 60), 2, y, GREY); y += 12
-
-    tft.fill_rect(0, H-12, W, 12, BLACK)
-    tft.text("SEL:refresh  L/R:exit", 2, H-10, GREY)
+    ram_col = GREEN if pct_ram < 0.7 else (YELLOW if pct_ram < 0.9 else RED)
+    draw_bar(4, y, W - 8, 6, pct_ram, ram_col)
+    
+    y += 14
+    
+    # 3. CPU & Uptime
+    cpu = freq() // 1000000
+    tft.text("CPU Freq: {} MHz".format(cpu), 4, y, CYAN)
+    
+    y += 12
+    ms = time.ticks_ms()
+    secs = ms // 1000
+    mins = secs // 60
+    hrs = mins // 60
+    uptime_str = "Up: {:02d}:{:02d}:{:02d}".format(hrs, mins % 60, secs % 60)
+    tft.text(uptime_str, 4, y, GREY)
+    
+    # Footer
+    tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
+    tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
+    tft.text("SEL: Exit to Menu", 4, H - FOOTER_H + 2, GREY)
+    
     tft.show()
 
-_draw()
-last_l = last_r = last_s = 1
-last_refresh = time.ticks_ms()
+# Main Loop
+last_s = 1
+last_draw = 0
 
 while True:
-    l = BTN_LEFT.value()
-    r = BTN_RIGHT.value()
+    # Nur jede Sekunde neu zeichnen um CPU zu schonen
+    if time.ticks_diff(time.ticks_ms(), last_draw) > 1000:
+        draw_sysmon()
+        last_draw = time.ticks_ms()
+        
+    # Smart Exit
     s = BTN_SELECT.value()
-
-    if last_l == 1 and l == 0:
-        break
-    if last_r == 1 and r == 0:
-        break
     if last_s == 1 and s == 0:
-        _draw()
-        time.sleep_ms(200)
-
-    # Auto-refresh alle 5 Sekunden
-    if time.ticks_diff(time.ticks_ms(), last_refresh) > 5000:
-        _draw()
-        last_refresh = time.ticks_ms()
-
-    last_l = l; last_r = r; last_s = s
-    time.sleep_ms(10)
+        time.sleep_ms(100)
+        break
+    last_s = s
+    time.sleep_ms(20)
