@@ -1,55 +1,62 @@
-# clock.py - CyberDeck Clock App
-# Verfügbar: tft, W, H, BTN_LEFT, BTN_SELECT, BTN_RIGHT
-
+# clock.py - CyberDeck Clock App (Landscape Overhaul)
 import time
+import ntptime
+from st7735 import BLACK, WHITE, GREEN, GREY, DARKGREY
 
-def _c(color):
-    return ((color & 0xFF) << 8) | (color >> 8)
-
-BLACK  = _c(0x0000)
-GREEN  = _c(0x07E0)
-GREY   = _c(0x8410)
-
-UTC_OFFSET = 2  # Wien: Sommer=2, Winter=1
-
+# Versuche Zeit zu synchronisieren
 try:
-    import ntptime
     ntptime.settime()
 except:
     pass
 
-# Initiales Layout
-tft.fill(BLACK)
-tft.fill_rect(0, 0, W, 14, GREEN)
-tft.text("Clock", 2, 3, BLACK)
-tft.text("SEL: zurueck", 2, H - 10, GREY)
-tft.show()
+UTC_OFFSET = 2  # Sommerzeit: +2, Winterzeit: +1
 
+# UI Konstanten für 160x128
+HEADER_H = 14
+FOOTER_H = 12
+
+def draw_clock_ui(timestr, datestr):
+    tft.fill(BLACK)
+    
+    # Header
+    tft.fill_rect(0, 0, W, HEADER_H, GREEN)
+    tft.text("REALTIME CLOCK", 4, 3, BLACK)
+    
+    # Zeit-Anzeige (Groß und mittig platziert)
+    # Ein Zeichen ist 8 Pixel breit, 8 Zeichen = 64 Pixel. Mittig bei W=160 -> (160-64)/2 = 48
+    tft.text(timestr, 48, 50, GREEN)
+    
+    # Datum-Anzeige darunter
+    # 10 Zeichen = 80 Pixel. Mittig bei W=160 -> (160-80)/2 = 40
+    tft.text(datestr, 40, 72, WHITE)
+    
+    # Footer
+    tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
+    tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
+    tft.text("SEL: Exit to Menu", 4, H - FOOTER_H + 2, GREY)
+    
+    tft.show()
+
+# Main Loop
 last_sec = -1
-running  = True
+last_l = last_r = last_s = 1
 
-while running:
-    t    = time.localtime()
-    sec  = t[5]
+while True:
+    t = time.localtime()
+    sec = t[5]
     hour = (t[3] + UTC_OFFSET) % 24
     mins = t[4]
-
+    
     if sec != last_sec:
         last_sec = sec
         timestr = "{:02d}:{:02d}:{:02d}".format(hour, mins, sec)
         datestr = "{:04d}-{:02d}-{:02d}".format(t[0], t[1], t[2])
-
-        tx = (W - len(timestr) * 6) // 2
-        tft.fill_rect(0, 35, W, 16, BLACK)
-        tft.text(timestr, tx, 38, GREEN)
-
-        dx = (W - len(datestr) * 6) // 2
-        tft.fill_rect(0, 56, W, 10, BLACK)
-        tft.text(datestr, dx, 58, GREY)
-        tft.show()
-
-    if BTN_SELECT.value() == 0:
+        draw_clock_ui(timestr, datestr)
+        
+    # Smart Exit über SELECT-Button
+    s = BTN_SELECT.value()
+    if last_s == 1 and s == 0:
         time.sleep_ms(100)
-        running = False
-
-    time.sleep_ms(50)
+        break
+    last_s = s
+    time.sleep_ms(20)
