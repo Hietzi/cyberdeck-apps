@@ -1,4 +1,4 @@
-# sysmon.py - CyberDeck System Monitor (Landscape Overhaul)
+# sysmon.py - CyberDeck System Monitor (Landscape Overhaul with Debounce)
 import time
 import network
 import gc
@@ -7,6 +7,26 @@ from st7735 import BLACK, WHITE, GREEN, CYAN, RED, GREY, DARKGREY, YELLOW
 
 HEADER_H = 14
 FOOTER_H = 12
+
+# --- Debounce & Hardware Safety Logic ---
+DEBOUNCE_MS = 200
+last_press_time = 0
+
+def btn_pressed(btn):
+    global last_press_time
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_press_time) < DEBOUNCE_MS:
+        return False
+    if btn.value() == 0:
+        time.sleep_ms(20)
+        if btn.value() == 0:
+            last_press_time = time.ticks_ms()
+            return True
+    return False
+
+def wait_btn_release(btn):
+    while btn.value() == 0:
+        time.sleep_ms(10)
 
 def draw_bar(x, y, w, h, pct, col):
     tft.fill_rect(x, y, w, h, DARKGREY)
@@ -18,13 +38,11 @@ def draw_sysmon():
     gc.collect()
     tft.fill(BLACK)
     
-    # Header
     tft.fill_rect(0, 0, W, HEADER_H, GREEN)
     tft.text("SYSTEM MONITOR", 4, 3, BLACK)
     
     y = 20
     
-    # 1. WiFi Status
     wlan = network.WLAN(network.STA_IF)
     if wlan.isconnected():
         ip = wlan.ifconfig()[0]
@@ -41,7 +59,6 @@ def draw_sysmon():
     
     y += 16
     
-    # 2. RAM Usage
     free = gc.mem_free()
     alloc = gc.mem_alloc()
     total = free + alloc
@@ -53,7 +70,6 @@ def draw_sysmon():
     
     y += 14
     
-    # 3. CPU & Uptime
     cpu = freq() // 1000000
     tft.text("CPU Freq: {} MHz".format(cpu), 4, y, CYAN)
     
@@ -65,7 +81,6 @@ def draw_sysmon():
     uptime_str = "Up: {:02d}:{:02d}:{:02d}".format(hrs, mins % 60, secs % 60)
     tft.text(uptime_str, 4, y, GREY)
     
-    # Footer
     tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
     tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
     tft.text("SEL: Exit to Menu", 4, H - FOOTER_H + 2, GREY)
@@ -73,19 +88,16 @@ def draw_sysmon():
     tft.show()
 
 # Main Loop
-last_s = 1
 last_draw = 0
 
 while True:
-    # Nur jede Sekunde neu zeichnen um CPU zu schonen
     if time.ticks_diff(time.ticks_ms(), last_draw) > 1000:
         draw_sysmon()
         last_draw = time.ticks_ms()
         
-    # Smart Exit
-    s = BTN_SELECT.value()
-    if last_s == 1 and s == 0:
-        time.sleep_ms(100)
+    # Smart Exit with strict debouncing
+    if btn_pressed(BTN_SELECT):
+        wait_btn_release(BTN_SELECT)
         break
-    last_s = s
+
     time.sleep_ms(20)
