@@ -1,4 +1,4 @@
-# calculator.py - CyberDeck Calculator (Landscape Overhaul)
+# calculator.py - CyberDeck Calculator (Landscape Overhaul with Debounce)
 import time
 from st7735 import BLACK, WHITE, GREEN, RED, CYAN, GREY, DARKGREY, YELLOW
 
@@ -16,6 +16,26 @@ ROWS = len(KEYS)
 KEY_W = 40  # 4 * 40 = 160 Pixel volle Displaybreite
 KEY_H = 16  # 5 * 16 = 80 Pixel Höhe für das Grid
 DISPLAY_H = 34 # 128 - 80 - 14 (Footer) = 34 Pixel Displayhöhe
+
+# --- Debounce & Hardware Safety Logic ---
+DEBOUNCE_MS = 200
+last_press_time = 0
+
+def btn_pressed(btn):
+    global last_press_time
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_press_time) < DEBOUNCE_MS:
+        return False
+    if btn.value() == 0:
+        time.sleep_ms(20)
+        if btn.value() == 0:
+            last_press_time = time.ticks_ms()
+            return True
+    return False
+
+def wait_btn_release(btn):
+    while btn.value() == 0:
+        time.sleep_ms(10)
 
 def get_key_color(k):
     if k in "+-*/": return CYAN
@@ -70,35 +90,32 @@ cx, cy = 0, 0
 expr = ""
 result = "0"
 open_p = 0
-last_l = last_r = last_s = 1
 
 while True:
     draw_calc_ui(expr, result, cx, cy)
     
     while True:
-        l = BTN_LEFT.value()
-        r = BTN_RIGHT.value()
-        s = BTN_SELECT.value()
-        
-        # Navigation innerhalb der Zeile
-        if last_l == 1 and l == 0:
+        # Linker Button
+        if btn_pressed(BTN_LEFT):
             cx = (cx - 1) % COLS
-            time.sleep_ms(130); break
-        if last_r == 1 and r == 0:
-            cx = (cx + 1) % COLS
-            time.sleep_ms(130); break
+            wait_btn_release(BTN_LEFT)
+            break
             
-        # Bestätigung / Zeilenwechsel
-        if last_s == 1 and s == 0:
+        # Rechter Button
+        if btn_pressed(BTN_RIGHT):
+            cx = (cx + 1) % COLS
+            wait_btn_release(BTN_RIGHT)
+            break
+            
+        # Bestätigung / Zeilenwechsel (SELECT)
+        if btn_pressed(BTN_SELECT):
             t0 = time.ticks_ms()
-            while BTN_SELECT.value() == 0:
-                time.sleep_ms(10)
-            dur = time.ticks_diff(time.ticks_ms(), t0)
+            wait_btn_release(BTN_SELECT)
+            dur = time.ticks_diff(time.ticks_ms(), t0) + 20 # Zuzüglich der 20ms Messzeit aus btn_pressed
             
             if dur > 500:
                 # Langer Klick = Zeile nach unten wechseln
                 cy = (cy + 1) % ROWS
-                time.sleep_ms(50)
             else:
                 # Kurzer Klick = Taste ausführen
                 k = KEYS[cy][cx]
@@ -129,7 +146,6 @@ while True:
                         result = evaluate(expr)
             break
             
-        last_l = l; last_r = r; last_s = s
         time.sleep_ms(10)
         
     if cx == -1: # EXIT gedrückt
