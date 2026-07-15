@@ -1,4 +1,4 @@
-# snake.py - CyberDeck Snake (Landscape Overhaul)
+# snake.py - CyberDeck Snake (Landscape Overhaul with Debounce)
 import time
 from st7735 import BLACK, WHITE, GREEN, RED, GREY, DARKGREY, CYAN
 
@@ -7,15 +7,31 @@ try:
 except:
     import random
 
-# UI Dimensionen
 HEADER_H = 14
 CELL = 8
-# Spielfeld berechnen für 160x128
-# Breite 160 -> 20 Zellen à 8 Pixel
-# Höhe 128 - 14 (Header) = 114 -> 14 Zellen à 8 Pixel = 112 Pixel (2 Pixel Rest unten)
 GRID_W = 20
 GRID_H = 14
 OFFSET_Y = HEADER_H
+
+# --- Debounce & Hardware Safety Logic ---
+DEBOUNCE_MS = 200
+last_press_time = 0
+
+def btn_pressed(btn):
+    global last_press_time
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_press_time) < DEBOUNCE_MS:
+        return False
+    if btn.value() == 0:
+        time.sleep_ms(20)
+        if btn.value() == 0:
+            last_press_time = time.ticks_ms()
+            return True
+    return False
+
+def wait_btn_release(btn):
+    while btn.value() == 0:
+        time.sleep_ms(10)
 
 def draw_cell(pos, color):
     tft.fill_rect(pos[0] * CELL, OFFSET_Y + pos[1] * CELL, CELL - 1, CELL - 1, color)
@@ -26,7 +42,6 @@ def spawn_food(snake):
         if f not in snake:
             return f
 
-# Spiel-Initialisierung
 snake = [(5, 7), (4, 7), (3, 7)]
 direction = 1 # 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT
 food = spawn_food(snake)
@@ -37,47 +52,38 @@ tft.fill(BLACK)
 tft.fill_rect(0, 0, W, HEADER_H, GREEN)
 tft.text("SNAKE OS - Score: 0", 4, 3, BLACK)
 
-# Zellen initial zeichnen
 for p in snake: draw_cell(p, GREEN)
 draw_cell(food, RED)
 tft.show()
 
-last_l = last_r = last_s = 1
 move_timer = time.ticks_ms()
 speed = 150 # ms pro Schritt
 
 while True:
-    l = BTN_LEFT.value()
-    r = BTN_RIGHT.value()
-    s = BTN_SELECT.value()
-    
-    # Smart Chord Exit: Wenn Links + Rechts GLEICHZEITIG gedrückt werden, sofort beenden!
-    if l == 0 and r == 0:
-        time.sleep_ms(200)
-        break
+    # Smart Chord Exit
+    if BTN_LEFT.value() == 0 and BTN_RIGHT.value() == 0:
+        time.sleep_ms(20)
+        if BTN_LEFT.value() == 0 and BTN_RIGHT.value() == 0:
+            wait_btn_release(BTN_LEFT)
+            wait_btn_release(BTN_RIGHT)
+            break
         
-    # Richtungssteuerung
-    if last_l == 1 and l == 0:
+    # Richtungssteuerung (HINWEIS: Hier OHNE wait_btn_release, damit das Spiel nicht pausiert!)
+    if btn_pressed(BTN_LEFT):
         direction = (direction - 1) % 4
-        time.sleep_ms(50)
-    if last_r == 1 and r == 0:
+    if btn_pressed(BTN_RIGHT):
         direction = (direction + 1) % 4
-        time.sleep_ms(50)
         
-    last_l = l; last_r = r
-    
     if not game_over:
         if time.ticks_diff(time.ticks_ms(), move_timer) > speed:
             move_timer = time.ticks_ms()
             
-            # Nächsten Schritt berechnen
             head = snake[0]
             if direction == 0:   new_head = (head[0], head[1] - 1)
             elif direction == 1: new_head = (head[0] + 1, head[1])
             elif direction == 2: new_head = (head[0], head[1] + 1)
             elif direction == 3: new_head = (head[0] - 1, head[1])
             
-            # Kollisionsprüfung Wand oder sich selbst
             if (new_head[0] < 0 or new_head[0] >= GRID_W or 
                 new_head[1] < 0 or new_head[1] >= GRID_H or 
                 new_head in snake):
@@ -88,19 +94,18 @@ while True:
                 
                 if new_head == food:
                     score += 1
-                    # Header updaten
                     tft.fill_rect(0, 0, W, HEADER_H, GREEN)
                     tft.text("SNAKE OS - Score: {}".format(score), 4, 3, BLACK)
                     food = spawn_food(snake)
                     draw_cell(food, RED)
-                    speed = max(80, 150 - (score * 4)) # Wird schneller
+                    speed = max(80, 150 - (score * 4))
                 else:
                     tail = snake.pop()
                     draw_cell(tail, BLACK)
                     
             tft.show()
     else:
-        # Game Over Screen im Cyberpunk-Look
+        # Game Over Screen
         tft.fill_rect(20, 35, 120, 65, DARKGREY)
         tft.rect(20, 35, 120, 65, RED)
         tft.text("GAME OVER", 44, 45, RED)
@@ -110,14 +115,15 @@ while True:
         tft.show()
         
         while True:
-            l = BTN_LEFT.value()
-            r = BTN_RIGHT.value()
-            s = BTN_SELECT.value()
-            if l == 0 and r == 0: # Exit Chord
-                time.sleep_ms(200)
-                break
-            if s == 0: # Restart
-                time.sleep_ms(150)
+            if BTN_LEFT.value() == 0 and BTN_RIGHT.value() == 0:
+                time.sleep_ms(20)
+                if BTN_LEFT.value() == 0 and BTN_RIGHT.value() == 0:
+                    wait_btn_release(BTN_LEFT)
+                    wait_btn_release(BTN_RIGHT)
+                    break
+            
+            if btn_pressed(BTN_SELECT):
+                wait_btn_release(BTN_SELECT)
                 snake = [(5, 7), (4, 7), (3, 7)]
                 direction = 1
                 score = 0
@@ -131,6 +137,7 @@ while True:
                 tft.show()
                 break
             time.sleep_ms(10)
-        if game_over: # Loop abgebrochen durch Exit Chord
+            
+        if game_over: # Break out of outer loop if Exited
             break
     time.sleep_ms(10)
