@@ -1,21 +1,19 @@
-# calculator.py - CyberDeck Calculator (Landscape Overhaul with Debounce)
+# clock.py - CyberDeck Clock App (Landscape Overhaul with Debounce)
 import time
-from st7735 import BLACK, WHITE, GREEN, RED, CYAN, GREY, DARKGREY, YELLOW
+import ntptime
+from st7735 import BLACK, WHITE, GREEN, GREY, DARKGREY
 
-KEYS = [
-    ["7", "8", "9", "/"],
-    ["4", "5", "6", "*"],
-    ["1", "2", "3", "-"],
-    ["0", ".", "=", "+"],
-    ["C", "DEL", "()", "EXIT"]
-]
-COLS = 4
-ROWS = len(KEYS)
+# Versuche Zeit zu synchronisieren
+try:
+    ntptime.settime()
+except:
+    pass
 
-# Tastenabmessungen perfekt für 160px Breite im Querformat ausgelegt
-KEY_W = 40  # 4 * 40 = 160 Pixel volle Displaybreite
-KEY_H = 16  # 5 * 16 = 80 Pixel Höhe für das Grid
-DISPLAY_H = 34 # 128 - 80 - 14 (Footer) = 34 Pixel Displayhöhe
+UTC_OFFSET = 2  # Sommerzeit: +2, Winterzeit: +1
+
+# UI Konstanten für 160x128
+HEADER_H = 14
+FOOTER_H = 12
 
 # --- Debounce & Hardware Safety Logic ---
 DEBOUNCE_MS = 200
@@ -37,116 +35,44 @@ def wait_btn_release(btn):
     while btn.value() == 0:
         time.sleep_ms(10)
 
-def get_key_color(k):
-    if k in "+-*/": return CYAN
-    if k == "=": return GREEN
-    if k in ("C", "DEL"): return RED
-    if k == "EXIT": return YELLOW
-    return DARKGREY
-
-def draw_calc_ui(expr, res, cx, cy):
+def draw_clock_ui(timestr, datestr):
     tft.fill(BLACK)
     
-    # 1. Rechen-Display oben
-    tft.fill_rect(0, 0, W, DISPLAY_H, BLACK)
-    # Ausdruck oben rechtsbündig
-    tft.text(expr[-19:], W - (len(expr[-19:]) * 8) - 4, 4, WHITE)
-    # Ergebnis darunter rechtsbündig
-    if res:
-        tft.text(res[-19:], W - (len(res[-19:]) * 8) - 4, 20, GREEN)
-        
-    tft.line(0, DISPLAY_H, W, DISPLAY_H, GREY)
+    # Header
+    tft.fill_rect(0, 0, W, HEADER_H, GREEN)
+    tft.text("REALTIME CLOCK", 4, 3, BLACK)
     
-    # 2. Keypad zeichnen
-    for r in range(ROWS):
-        for c in range(COLS):
-            k = KEYS[r][c]
-            kx = c * KEY_W
-            ky = DISPLAY_H + 1 + (r * KEY_H)
-            
-            # Highlight für die ausgewählte Taste
-            if r == cy and c == cx:
-                tft.fill_rect(kx, ky, KEY_W - 1, KEY_H - 1, WHITE)
-                tft.text(k, kx + (KEY_W - len(k)*8)//2, ky + 4, BLACK)
-            else:
-                tft.fill_rect(kx, ky, KEY_W - 1, KEY_H - 1, get_key_color(k))
-                tft.text(k, kx + (KEY_W - len(k)*8)//2, ky + 4, WHITE)
-                
+    # Zeit-Anzeige (Groß und mittig platziert)
+    tft.text(timestr, 48, 50, GREEN)
+    
+    # Datum-Anzeige darunter
+    tft.text(datestr, 40, 72, WHITE)
+    
+    # Footer
+    tft.fill_rect(0, H - FOOTER_H, W, FOOTER_H, BLACK)
+    tft.line(0, H - FOOTER_H, W, H - FOOTER_H, DARKGREY)
+    tft.text("SEL: Exit to Menu", 4, H - FOOTER_H + 2, GREY)
+    
     tft.show()
 
-def evaluate(expr):
-    try:
-        # Sicheres Ersetzen für MicroPython's eval
-        s = expr.replace(" ", "")
-        if not s: return "0"
-        return str(eval(s))
-    except ZeroDivisionError:
-        return "Div/0"
-    except:
-        return "Error"
-
-# Main Workflow
-cx, cy = 0, 0
-expr = ""
-result = "0"
-open_p = 0
+# Main Loop
+last_sec = -1
 
 while True:
-    draw_calc_ui(expr, result, cx, cy)
+    t = time.localtime()
+    sec = t[5]
+    hour = (t[3] + UTC_OFFSET) % 24
+    mins = t[4]
     
-    while True:
-        # Linker Button
-        if btn_pressed(BTN_LEFT):
-            cx = (cx - 1) % COLS
-            wait_btn_release(BTN_LEFT)
-            break
-            
-        # Rechter Button
-        if btn_pressed(BTN_RIGHT):
-            cx = (cx + 1) % COLS
-            wait_btn_release(BTN_RIGHT)
-            break
-            
-        # Bestätigung / Zeilenwechsel (SELECT)
-        if btn_pressed(BTN_SELECT):
-            t0 = time.ticks_ms()
-            wait_btn_release(BTN_SELECT)
-            dur = time.ticks_diff(time.ticks_ms(), t0) + 20 # Zuzüglich der 20ms Messzeit aus btn_pressed
-            
-            if dur > 500:
-                # Langer Klick = Zeile nach unten wechseln
-                cy = (cy + 1) % ROWS
-            else:
-                # Kurzer Klick = Taste ausführen
-                k = KEYS[cy][cx]
-                if k == "EXIT":
-                    cx = -1 # Signalisiert Beenden
-                elif k == "C":
-                    expr = ""
-                    result = "0"
-                    open_p = 0
-                elif k == "DEL":
-                    expr = expr[:-1]
-                    result = evaluate(expr) if expr else "0"
-                elif k == "=":
-                    result = evaluate(expr)
-                    if result not in ("Error", "Div/0"):
-                        expr = result
-                elif k == "()":
-                    if open_p == 0 or (expr and expr[-1] in "+-*/("):
-                        expr += "("
-                        open_p += 1
-                    else:
-                        expr += ")"
-                        open_p -= 1
-                else:
-                    # Mathematische Operatoren / Zahlen anhängen
-                    expr += k
-                    if k not in "+-*/":
-                        result = evaluate(expr)
-            break
-            
-        time.sleep_ms(10)
+    if sec != last_sec:
+        last_sec = sec
+        timestr = "{:02d}:{:02d}:{:02d}".format(hour, mins, sec)
+        datestr = "{:04d}-{:02d}-{:02d}".format(t[0], t[1], t[2])
+        draw_clock_ui(timestr, datestr)
         
-    if cx == -1: # EXIT gedrückt
+    # Smart Exit über SELECT-Button mit stabiler Entprellung
+    if btn_pressed(BTN_SELECT):
+        wait_btn_release(BTN_SELECT)
         break
+        
+    time.sleep_ms(20)
